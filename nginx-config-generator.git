@@ -1,0 +1,69 @@
+#!/bin/bash
+
+# Define variables
+DOMAIN="your-domain.com"
+WEBROOT="/var/www/html/wordpress"
+LOG_DIR="/var/log/nginx"
+PHP_FPM_SOCK="/var/run/php/php8.2-fpm.sock"
+
+# Create Nginx configuration file
+cat > /etc/nginx/sites-available/$DOMAIN <<EOF
+server {
+    listen 80;
+    server_name $DOMAIN www.$DOMAIN;
+
+    root $WEBROOT;
+    index index.php;
+
+    access_log $LOG_DIR/access.log;
+    error_log $LOG_DIR/error.log;
+
+    location / {
+        try_files \$uri \$uri/ /index.php?\$args;
+    }
+
+    location ~ \.php$ {
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        fastcgi_pass unix:$PHP_FPM_SOCK;
+    }
+
+    # Security modifications
+    location = /wp-login.php {
+        limit_req zone=wplogin burst=3 nodelay;
+        try_files \$uri =404;
+    }
+
+    location ~* wp-config.php {
+        deny all;
+    }
+
+    location ~* \.(htaccess|htpasswd) {
+        deny all;
+    }
+
+    location /wp-content/uploads/ {
+        location ~* \.(php|php5)$ {
+            deny all;
+        }
+    }
+
+    # Performance modifications
+    gzip on;
+    gzip_disable "msie6";
+    gzip_comp_level 5;
+    gzip_types text/plain text/css application/json application/x-javascript text/xml application/xml application/xml+rss text/javascript;
+
+    fastcgi_buffers 16 16k;
+    fastcgi_buffer_size 32k;
+    fastcgi_connect_timeout 300;
+    fastcgi_send_timeout 300;
+    fastcgi_read_timeout 300;
+}
+EOF
+
+# Create a symbolic link to enable the site
+ln -s /etc/nginx/sites-available/$DOMAIN /etc/nginx/sites-enabled/
+
+# Restart Nginx
+systemctl restart nginx
